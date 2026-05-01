@@ -46,13 +46,97 @@
           return jsonValue;
         }
         if (jsonValue && typeof jsonValue === "object") {
+          const topLevelArrays = Object.values(jsonValue).filter(Array.isArray);
+          if (topLevelArrays.length > 0) {
+            topLevelArrays.sort(function (left, right) {
+              return right.length - left.length;
+            });
+            return topLevelArrays[0];
+          }
           return [jsonValue];
         }
         return [{ value: jsonValue }];
       }
 
+      function toCellValue(value) {
+        function normalizeExcelString(text) {
+          const cleaned = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+          return cleaned.length > 32767 ? cleaned.slice(0, 32767) : cleaned;
+        }
+
+        if (value == null) {
+          return value;
+        }
+        if (typeof value === "string") {
+          // Excel XML cannot contain control chars except tab/newline/carriage return.
+          return normalizeExcelString(value);
+        }
+        if (typeof value === "number") {
+          return Number.isFinite(value) ? value : String(value);
+        }
+        if (typeof value === "bigint") {
+          return String(value);
+        }
+        if (value instanceof Date) {
+          return value.toISOString();
+        }
+        if (typeof value === "object") {
+          const seen = new WeakSet();
+          const serialized = JSON.stringify(value, function (key, nested) {
+            if (typeof nested === "bigint") {
+              return String(nested);
+            }
+            if (nested && typeof nested === "object") {
+              if (seen.has(nested)) {
+                return "[Circular]";
+              }
+              seen.add(nested);
+            }
+            if (typeof nested === "string") {
+              return normalizeExcelString(nested);
+            }
+            return nested;
+          });
+          return normalizeExcelString(serialized);
+        }
+        return value;
+      }
+
+      function flattenRow(source, prefix, target) {
+        if (Array.isArray(source)) {
+          // Keep arrays in one cell to avoid generating >16,384 columns.
+          target[prefix || "value"] = toCellValue(source);
+          return;
+        }
+
+        if (source && typeof source === "object" && !(source instanceof Date)) {
+          const entries = Object.entries(source);
+          if (entries.length === 0) {
+            target[prefix] = "{}";
+            return;
+          }
+          entries.forEach(function (entry) {
+            const key = entry[0];
+            const value = entry[1];
+            const nextKey = prefix ? prefix + "." + key : key;
+            flattenRow(value, nextKey, target);
+          });
+          return;
+        }
+
+        target[prefix || "value"] = toCellValue(source);
+      }
+
+      function flattenRows(rows) {
+        return rows.map(function (row) {
+          const flattened = {};
+          flattenRow(row, "", flattened);
+          return flattened;
+        });
+      }
+
       function downloadWorkbook(rows) {
-        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const worksheet = XLSX.utils.json_to_sheet(flattenRows(rows));
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "data");
         XLSX.writeFile(workbook, "json-data.xlsx");
