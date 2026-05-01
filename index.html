@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSON to Excel</title>
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js" defer></script>
+  <style>
+    body {
+      max-width: 760px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+    .row {
+      display: grid;
+      gap: 0.75rem;
+    }
+    .status {
+      min-height: 1.25rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>JSON URL to Excel</h1>
+    <div id="status" role="alert" data-variant="info">Paste a URL that returns JSON, then download Excel file.</div>
+    <label for="json-url">JSON URL</label>
+    <input id="json-url" type="url" placeholder="https://api.example.com/data" autocomplete="off">
+    <button id="convert-btn" type="button">Convert and Download</button>
+  </main>
+
+  <script>
+    (function () {
+      const urlInput = document.getElementById("json-url");
+      const convertBtn = document.getElementById("convert-btn");
+      const statusEl = document.getElementById("status");
+
+      function setStatus(message, isError) {
+        statusEl.setAttribute("data-variant", isError ? "error" : "success");
+        statusEl.textContent = message;
+      }
+
+      function normalizeRows(jsonValue) {
+        if (Array.isArray(jsonValue)) {
+          return jsonValue;
+        }
+        if (jsonValue && typeof jsonValue === "object") {
+          return [jsonValue];
+        }
+        return [{ value: jsonValue }];
+      }
+
+      function downloadWorkbook(rows) {
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "data");
+        XLSX.writeFile(workbook, "json-data.xlsx");
+      }
+
+      async function convertAndDownload() {
+        const url = urlInput.value.trim();
+        if (!url) {
+          setStatus("Enter URL first.", true);
+          return;
+        }
+
+        convertBtn.disabled = true;
+        setStatus("Fetching JSON...", false);
+
+        try {
+          const response = await fetch(url, {
+            headers: { Accept: "application/json" }
+          });
+
+          if (!response.ok) {
+            throw new Error("Request failed: " + response.status + " " + response.statusText);
+          }
+
+          const data = await response.json();
+          const rows = normalizeRows(data);
+          downloadWorkbook(rows);
+          setStatus("Done. Download started.", false);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          setStatus("Error: " + message, true);
+        } finally {
+          convertBtn.disabled = false;
+        }
+      }
+
+      convertBtn.addEventListener("click", convertAndDownload);
+      urlInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          convertAndDownload();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
